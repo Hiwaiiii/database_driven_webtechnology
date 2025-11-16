@@ -7,8 +7,19 @@
 </head>
 <body>
     <h1>Add a New Movie</h1>
-    <!-- add form here -->
 
+    <form method="POST">
+        <label for="title">Movie Title:</label>
+        <input type="text" id="title" name="title" required><br><br>
+
+        <label for="year">Release Year:</label>
+        <input type="number" id="year" name="year" min="1900" max="2100" required><br><br>
+
+        <label for="number_of_oscars">Number of Oscars:</label>
+        <input type="number" id="number_of_oscars" name="number_of_oscars" min="0" required><br><br>
+
+        <input type="submit" value="Add Movie">
+    </form>
 
     <br>
     <a href="{{ url_for('index') }}">Back to Movies List</a>
