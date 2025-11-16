@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Movies</title>
+</head>
+<body>
+    <h1>Movies List</h1>
+
+    <!-- Displaying all movies -->
+    <ul>
+        {% for movie in movies %}
+            <li>
+                <strong>{{ movie.title }}</strong> ({{ movie.year }}) - Oscars: {{ movie.number_of_oscars }}
+            </li>
+        {% endfor %}
+    </ul>
+
+    <!-- Link to add a new movie -->
+    <a href="{{ url_for('add_movie') }}">Add a New Movie</a>
+</body>
+</html>
