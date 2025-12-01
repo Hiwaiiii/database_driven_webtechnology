@@ -35,6 +35,7 @@ class Movie(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(128), nullable=False)
     year = db.Column(db.Integer)
+    genre = db.Column(db.String(100))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
 
     def to_dict(self):
@@ -43,12 +44,13 @@ class Movie(db.Model):
             'id': self.id,
             'title': self.title,
             'year': self.year,
+            'genre': self.genre,
             'user_id': self.user_id
         }
         return data
 
     def from_dict(self, data):
         """Update movie from dictionary data"""
-        for field in ['title', 'year']:
+        for field in ['title', 'year', 'genre']:
             if field in data:
                 setattr(self, field, data[field])

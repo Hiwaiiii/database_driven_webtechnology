@@ -11,6 +11,7 @@
     <form method="POST" action="{{ url_for('add_movie') }}">
         <input type="text" name="title" placeholder="Title" required>
         <input type="number" name="year" placeholder="Year">
+        <input type="text" name="genre" placeholder="Genre">
         <button type="submit">Add</button>
     </form>
 
@@ -18,7 +19,7 @@
     <ul>
         {% for movie in movies %}
             <li>
-                {{ movie.title }} ({{ movie.year }})
+                {{ movie.title }} ({{ movie.year }}) - Genre: {{ movie.genre or 'Not Given' }}
                 <a href="{{ url_for('delete_movie', id=movie.id) }}">Delete</a>
             </li>
         {% endfor %}

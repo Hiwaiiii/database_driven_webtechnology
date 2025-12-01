@@ -1,10 +1,12 @@
 from flask import Flask
 from flask_sqlalchemy import SQLAlchemy
 from flask_login import LoginManager
+from flask_migrate import Migrate
 
 db = SQLAlchemy()
 login = LoginManager()
 login.login_view = 'login'
+migrate = Migrate()
 
 def create_app():
     app = Flask(__name__)
@@ -13,6 +15,13 @@ def create_app():
 
     db.init_app(app)
     login.init_app(app)
+    migrate.init_app(app, db)
+
+    from app.models import User
+
+    @login.user_loader
+    def load_user(user_id):
+        return User.query.get(int(user_id))
 
     # Register web routes
     from app.routes import register_routes
@@ -22,12 +31,4 @@ def create_app():
     from app.api import api
     app.register_blueprint(api, url_prefix='/api')
 
-    with app.app_context():
-        db.create_all()
-
     return app
-
-@login.user_loader
-def load_user(id):
-    from app.models import User
-    return User.query.get(int(id))

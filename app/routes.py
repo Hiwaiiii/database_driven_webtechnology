@@ -63,6 +63,7 @@ def register_routes(app):
     def add_movie():
         title = request.form.get('title')
         year = request.form.get('year')
+        genre = request.form.get('genre')
 
         movie = Movie(title=title, year=year, user_id=current_user.id)
         db.session.add(movie)

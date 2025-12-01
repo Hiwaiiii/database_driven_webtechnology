@@ -1,133 +1,197 @@
-from flask import Blueprint, jsonify, request
-from flask_login import login_required, current_user
-from app import db
-from app.models import Movie, User
+from flask import Blueprint, jsonify, request, g
 from werkzeug.http import HTTP_STATUS_CODES
+from functools import wraps
+from app import db
+from app.models import User, Movie
 
 api = Blueprint('api', __name__)
 
+def success_response(data, status_code=200):
+    """Return successful JSON response"""
+    response = jsonify(data)
+    response.status_code = status_code
+    return response
+
 def error_response(status_code, message=None):
-    """Generate error response in JSON format"""
-    payload = {'error': HTTP_STATUS_CODES.get(status_code, 'Unknown error')}
+    """Return error JSON response"""
+    payload = {
+        'error': HTTP_STATUS_CODES.get(status_code, 'Unknown Error')
+    }
     if message:
-        payload['message'] = message
+        payload['details'] = message
     response = jsonify(payload)
     response.status_code = status_code
     return response
 
-def bad_request(message):
-    """Return a 400 bad request error"""
-    return error_response(400, message)
+def authenticate_request(f):
+    """Verify token and load user for protected endpoints"""
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        auth_header = request.headers.get('Authorization', '')
+
+        if not auth_header:
+            return error_response(401, 'Missing authentication token')
+
+        token = auth_header.replace('Bearer ', '').strip()
+
+        if not token:
+            return error_response(401, 'Invalid token format')
+
+        user = User.verify_auth_token(token)
+
+        if not user:
+            return error_response(401, 'Token is invalid or has expired')
+
+        g.authenticated_user = user
+
+        return f(*args, **kwargs)
+
+    return wrapper
+
+@api.route('/token', methods=['POST'])
+def authenticate():
+    """Issue authentication token for valid credentials"""
+    request_data = request.get_json()
+
+    if not request_data:
+        return error_response(400, 'Request body must be JSON')
+
+    username = request_data.get('username')
+    password = request_data.get('password')
+
+    if not username or not password:
+        return error_response(400, 'Both username and password are required')
+
+    user = User.query.filter_by(username=username).first()
+
+    if not user or not user.check_password(password):
+        return error_response(401, 'Invalid username or password')
+
+    token = user.generate_auth_token()
+    db.session.commit()
+
+    return success_response({
+        'token': token,
+        'user_id': user.id,
+        'username': user.username,
+        'expires_in': 3600
+    })
 
 @api.route('/movies', methods=['GET'])
-@login_required
-def get_movies():
-    """Get all movies for the current user"""
-    page = request.args.get('page', 1, type=int)
-    per_page = min(request.args.get('per_page', 10, type=int), 100)
+@authenticate_request
+def list_movies():
+    """Retrieve all movies owned by authenticated user"""
+    user_movies = Movie.query.filter_by(user_id=g.authenticated_user.id).all()
 
-    movies = Movie.query.filter_by(user_id=current_user.id).paginate(
-        page=page, per_page=per_page, error_out=False
-    )
+    return success_response({
+        'movies': [m.to_dict() for m in user_movies],
+        'count': len(user_movies)
+    })
 
-    data = {
-        'items': [movie.to_dict() for movie in movies.items],
-        'meta': {
-            'page': page,
-            'per_page': per_page,
-            'total_pages': movies.pages,
-            'total_items': movies.total
-        }
-    }
-    return jsonify(data)
+@api.route('/movies/<int:movie_id>', methods=['GET'])
+@authenticate_request
+def retrieve_movie(movie_id):
+    """Get details of a specific movie"""
+    movie = Movie.query.get_or_404(movie_id)
 
-@api.route('/movies/<int:id>', methods=['GET'])
-@login_required
-def get_movie(id):
-    """Get a specific movie by ID"""
-    movie = Movie.query.get_or_404(id)
+    if movie.user_id != g.authenticated_user.id:
+        return error_response(403, 'You do not have access to this movie')
 
-    if movie.user_id != current_user.id:
-        return error_response(403, 'Access denied')
-
-    return jsonify(movie.to_dict())
+    return success_response(movie.to_dict())
 
 @api.route('/movies', methods=['POST'])
-@login_required
-def create_movie():
-    """Create a new movie"""
-    data = request.get_json() or {}
+@authenticate_request
+def add_movie():
+    """Create a new movie entry"""
+    request_data = request.get_json()
 
-    if 'title' not in data:
-        return bad_request('Must include title field')
+    if not request_data:
+        return error_response(400, 'Request body must be JSON')
 
-    movie = Movie(user_id=current_user.id)
-    movie.from_dict(data)
-    db.session.add(movie)
+    title = request_data.get('title')
+    if not title:
+        return error_response(400, 'Movie title is required')
+
+    new_movie = Movie(
+        title=title,
+        year=request_data.get('year'),
+        user_id=g.authenticated_user.id
+    )
+
+    db.session.add(new_movie)
     db.session.commit()
 
-    response = jsonify(movie.to_dict())
-    response.status_code = 201
-    response.headers['Location'] = f'/api/movies/{movie.id}'
+    response = success_response(new_movie.to_dict(), 201)
+    response.headers['Location'] = f'/api/movies/{new_movie.id}'
     return response
 
-@api.route('/movies/<int:id>', methods=['PUT'])
-@login_required
-def update_movie(id):
+@api.route('/movies/<int:movie_id>', methods=['PUT'])
+@authenticate_request
+def modify_movie(movie_id):
     """Update an existing movie"""
-    movie = Movie.query.get_or_404(id)
+    movie = Movie.query.get_or_404(movie_id)
 
-    if movie.user_id != current_user.id:
-        return error_response(403, 'Access denied')
+    if movie.user_id != g.authenticated_user.id:
+        return error_response(403, 'You do not have access to this movie')
 
-    data = request.get_json() or {}
-    movie.from_dict(data)
+    request_data = request.get_json()
+
+    if not request_data:
+        return error_response(400, 'Request body must be JSON')
+
+    movie.from_dict(request_data)
     db.session.commit()
 
-    return jsonify(movie.to_dict())
+    return success_response(movie.to_dict())
 
-@api.route('/movies/<int:id>', methods=['DELETE'])
-@login_required
-def delete_movie(id):
+@api.route('/movies/<int:movie_id>', methods=['DELETE'])
+@authenticate_request
+def remove_movie(movie_id):
     """Delete a movie"""
-    movie = Movie.query.get_or_404(id)
+    movie = Movie.query.get_or_404(movie_id)
 
-    if movie.user_id != current_user.id:
-        return error_response(403, 'Access denied')
+    if movie.user_id != g.authenticated_user.id:
+        return error_response(403, 'You do not have access to this movie')
 
     db.session.delete(movie)
     db.session.commit()
 
     return '', 204
 
-
-@api.route('/users/<int:id>', methods=['GET'])
-@login_required
-def get_user(id):
-    """Get user information"""
-    if id != current_user.id:
-        return error_response(403, 'Access denied')
-
-    user = User.query.get_or_404(id)
-    return jsonify(user.to_dict())
-
 @api.route('/users', methods=['POST'])
-def create_user():
-    """Register a new user"""
-    data = request.get_json() or {}
+def register_user():
+    """Create a new user account"""
+    request_data = request.get_json()
 
-    if 'username' not in data or 'password' not in data:
-        return bad_request('Must include username and password fields')
+    if not request_data:
+        return error_response(400, 'Request body must be JSON')
 
-    if User.query.filter_by(username=data['username']).first():
-        return bad_request('Username already exists')
+    username = request_data.get('username')
+    password = request_data.get('password')
 
-    user = User(username=data['username'])
-    user.set_password(data['password'])
-    db.session.add(user)
+    if not username or not password:
+        return error_response(400, 'Both username and password are required')
+
+    if User.query.filter_by(username=username).first():
+        return error_response(400, 'Username already taken')
+
+    # Create new user
+    new_user = User(username=username)
+    new_user.set_password(password)
+
+    db.session.add(new_user)
     db.session.commit()
 
-    response = jsonify(user.to_dict())
-    response.status_code = 201
-    response.headers['Location'] = f'/api/users/{user.id}'
+    response = success_response(new_user.to_dict(), 201)
+    response.headers['Location'] = f'/api/users/{new_user.id}'
     return response
+
+@api.route('/users/<int:user_id>', methods=['GET'])
+@authenticate_request
+def get_user_profile(user_id):
+    """Retrieve user profile information"""
+    if user_id != g.authenticated_user.id:
+        return error_response(403, 'You can only access your own profile')
+
+    user = User.query.get_or_404(user_id)
+    return success_response(user.to_dict())
