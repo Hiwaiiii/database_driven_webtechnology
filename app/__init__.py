@@ -14,8 +14,13 @@ def create_app():
     db.init_app(app)
     login.init_app(app)
 
+    # Register web routes
     from app.routes import register_routes
     register_routes(app)
+
+    # Register API blueprint
+    from app.api import api
+    app.register_blueprint(api, url_prefix='/api')
 
     with app.app_context():
         db.create_all()
